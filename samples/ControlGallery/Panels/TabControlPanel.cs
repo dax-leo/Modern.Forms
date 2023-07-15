@@ -27,9 +27,9 @@ namespace ControlGallery.Panels
             tp4.Controls.Add (new Label { Text = "Tab 1 Contents!", Left = 3, Top = 3 });
             tc.TabPages.Insert (1, tp4);
 
-            var tp5 = new TabPage { Text = "Tab 2" };
-            tp5.Controls.Add (new Label { Text = "Tab 2 Contents!", Left = 3, Top = 3 });
-            tc.TabPages[2] = tp5;
+            //var tp5 = new TabPage { Text = "Tab 2" };
+            //tp5.Controls.Add (new Label { Text = "Tab 2 Contents!", Left = 3, Top = 3 });
+            //tc.TabPages[2] = tp5;
 
             tc.TabPages.RemoveAt (0);
         }

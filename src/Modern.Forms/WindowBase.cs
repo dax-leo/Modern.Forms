@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using Modern.WindowKit;
 using Modern.WindowKit.Controls;
@@ -311,7 +312,7 @@ namespace Modern.Forms
         /// </summary>
         /// <param name="e">A PaintEventArgs that contains the event data.</param>
         protected virtual void OnPaint (PaintEventArgs e)
-        {
+        {            
         }
 
         /// <summary>

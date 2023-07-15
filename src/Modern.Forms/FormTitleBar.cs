@@ -34,6 +34,7 @@ namespace Modern.Forms
                 if (form_min != null)
                     form_min.WindowState = FormWindowState.Minimized;
             };
+            minimize_button.Style.BackgroundColor = Theme.PrimaryColor;
 
             maximize_button = Controls.AddImplicitControl (new TitleBarButton (TitleBarButton.TitleBarButtonGlyph.Maximize));
             maximize_button.Click += (o, e) => {
@@ -42,19 +43,21 @@ namespace Modern.Forms
                 if (form != null)
                     form.WindowState = form.WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
             };
+            maximize_button.Style.BackgroundColor = Theme.PrimaryColor;
 
             close_button = Controls.AddImplicitControl (new TitleBarButton (TitleBarButton.TitleBarButtonGlyph.Close));
             close_button.Click += (o, e) => { FindForm ()?.Close (); };
+            close_button.Style.BackgroundColor = Theme.PrimaryColor;
 
             form_image = Controls.AddImplicitControl (new PictureBox {
                 Width = DefaultSize.Height,
                 Dock = DockStyle.Left,
                 Visible = false,
-                SizeMode = PictureBoxSizeMode.CenterImage
+                SizeMode = PictureBoxSizeMode.StretchImage
             });
 
-            form_image.Style.BackgroundColor = SKColors.Transparent;
-            form_image.SetControlBehavior (ControlBehaviors.ReceivesMouseEvents, false);
+            form_image.Style.BackgroundColor = Theme.PrimaryColor;
+            form_image.SetControlBehavior (ControlBehaviors.ReceivesMouseEvents, false);            
         }
 
         /// <summary>

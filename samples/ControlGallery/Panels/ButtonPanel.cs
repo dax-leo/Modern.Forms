@@ -35,7 +35,7 @@ namespace ControlGallery.Panels
             Controls.Add (b2);
 
             var b3 = new Button {
-                Text = "OK",
+                Text = "Click to remove",
                 Left = 350,
                 Top = 100
             };
@@ -50,6 +50,8 @@ namespace ControlGallery.Panels
             b3.StyleHover.Border.Color = new SKColor (165, 168, 172);
             b3.StyleHover.ForegroundColor = new SKColor (36, 41, 46);
             b3.StyleHover.Border.Radius = 3;
+
+            b3.Click += (o, e) => Controls.Remove (b3);
 
             Controls.Add (b3);
 

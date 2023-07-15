@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Text;
@@ -11,13 +12,15 @@ namespace Modern.Forms
     internal class ControlAdapter : ScrollableControl
     {
         private Control? selected_control;
+        private SKBitmap? back_buffer;
+        private bool _fullRefresh = false;
 
         public ControlAdapter (WindowBase parent)
         {
             ParentForm = parent;
             SetControlBehavior (ControlBehaviors.Selectable, false);
         }
-
+        
         // We need to override this because the ControlAdapter doesn't need to be scaled
         public override Rectangle ClientRectangle {
             get {
@@ -43,27 +46,68 @@ namespace Modern.Forms
             var form_x = form_border.Left.GetWidth ();
             var form_y = form_border.Top.GetWidth ();
 
-            foreach (var control in Controls.GetAllControls ().Where (c => c.Visible).ToArray ()) {
+            var buffer = GetBackBuffer ();
+
+            foreach (var control in Controls.GetAllControls (true).Where (c => c.Visible).ToArray ()) {
                 if (control.Width <= 0 || control.Height <= 0)
                     continue;
 
-                var info = new SKImageInfo (control.Width, control.Height, SKImageInfo.PlatformColorType, SKAlphaType.Premul);
-                var buffer = control.GetBackBuffer ();
-
-                if (control.NeedsPaint) {
-                    using (var canvas = new SKCanvas (buffer)) {
-                        // start drawing
-                        var args = new PaintEventArgs(info, canvas, Scaling);
-
-                        control.RaisePaintBackground (args);
-                        control.RaisePaint (args);
-
-                        canvas.Flush ();
-                    }
-                }
-
-                e.Canvas.DrawBitmap (buffer, form_x + control.ScaledLeft, form_y + control.ScaledTop);
+                Paint (control, buffer);
             }
+
+            e.Canvas.DrawBitmap (buffer, form_x + 0, form_y + 0);
+            _fullRefresh = false;
+        }
+
+        private void Paint (Control control, SKBitmap? buffer)
+        {
+            if ((_fullRefresh || control.ThisNeedsPaint) && control.Visible) {
+                var info = new SKImageInfo (control.Width, control.Height, SKImageInfo.PlatformColorType, SKAlphaType.Premul);
+
+                using (var canvas = new SKCanvas (buffer)) {
+                    // start drawing
+                    var args = new PaintEventArgs (info, canvas, Scaling);
+
+                    var ctrl_position = control.GetPositionInForm ();
+                    var parent_pos = control.Parent == this ? Point.Empty : control.Parent.GetPositionInForm ();
+
+                    // points require scaling offset
+                    var scaled_ctrl_pos = new Point (
+                        (int)Math.Round (ctrl_position.X * Scaling, MidpointRounding.ToEven),
+                        (int)Math.Round (ctrl_position.Y * Scaling, MidpointRounding.ToEven));
+                    var scaled_parent_pos = new Point (
+                        (int)Math.Round (parent_pos.X * Scaling, MidpointRounding.ToEven),
+                        (int)Math.Round (parent_pos.Y * Scaling, MidpointRounding.ToEven));
+
+                    // Clipping must be within Parent bounds.
+                    // To make sure rendering is always within parent control we create [control] intersection against [control].Parent.
+                    var rec = new Rectangle (scaled_ctrl_pos, control.ScaledBounds.Size);
+                    var new_parent_bounds = new Rectangle (scaled_parent_pos, control.Parent.ScaledBounds.Size);
+                    rec.Intersect (new_parent_bounds);
+
+                    canvas.Clip (rec);
+                    canvas.Translate ((scaled_ctrl_pos.X), (scaled_ctrl_pos.Y));
+
+                    control.RaisePaintBackground (args);
+                    control.RaisePaint (args);
+
+                    canvas.Flush ();
+                }
+            }
+
+            // Recursively scan for other child controls.
+            foreach (var c in control.Controls.GetAllControls (true)) {
+                Paint (c, buffer);
+            }
+        }
+
+        protected override void OnControlRemoved (EventArgs<Control> e)
+        {
+            base.OnControlRemoved (e);
+
+            // After Adapter removed any Control from its collection we have to flush the buffer.
+            // Not to be confused, this is not related to removing any Child Control. In such case we only invalidate its parent.
+            _fullRefresh = true;
         }
 
         public override bool Visible {
@@ -91,6 +135,26 @@ namespace Modern.Forms
         internal void RaiseParentVisibleChanged (EventArgs e)
         {
             OnParentVisibleChanged (e);
+        }
+
+        internal SKBitmap GetBackBuffer ()
+        {
+            if (back_buffer is null || back_buffer.Width != ScaledSize.Width || back_buffer.Height != ScaledSize.Height || _fullRefresh) {
+                FreeBackBuffer ();
+                back_buffer = new SKBitmap (ScaledSize.Width, ScaledSize.Height, SKImageInfo.PlatformColorType, SKAlphaType.Premul);
+                SetState (States.IsDirty, true);
+                Invalidate ();
+            }
+
+            return back_buffer;
+        }
+
+        private void FreeBackBuffer ()
+        {
+            if (back_buffer != null) {
+                back_buffer.Dispose ();
+                back_buffer = null;
+            }
         }
     }
 }

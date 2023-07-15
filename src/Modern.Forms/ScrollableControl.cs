@@ -140,6 +140,7 @@ namespace Modern.Forms
                 ScrollWindow (0, vscrollbar.Value - scroll_position.Y);
             else if (sender == hscrollbar && hscrollbar.Visible)
                 ScrollWindow (hscrollbar.Value - scroll_position.X, 0);
+            Invalidate ();  // invaldiate this and children on scroll
         }
 
         /// <summary>
@@ -153,7 +154,7 @@ namespace Modern.Forms
             CalculateCanvasSize ();
             AdjustFormScrollbars (AutoScroll);
 
-            base.OnLayout (e);
+            base.OnLayout (e);            
         }
 
         /// <inheritdoc/>

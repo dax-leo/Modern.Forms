@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using Modern.Forms.Layout;
+using Modern.WindowKit.Threading;
 using SkiaSharp;
 
 namespace Modern.Forms
@@ -32,10 +33,11 @@ namespace Modern.Forms
         private string text = string.Empty;
         private byte layout_suspend_count;
 
-        private SKBitmap? back_buffer;
         private Control? current_mouse_in;
 
         private bool is_captured;
+
+        private SizeF _dpi = new SizeF (1, 1);
 
         // Property store keys for properties.
         private static readonly int s_controlsCollectionProperty = PropertyStore.CreateKey ();
@@ -68,7 +70,22 @@ namespace Modern.Forms
             _width = default_size.Width;
             _height = default_size.Height;
 
-            Theme.ThemeChanged += (o, e) => SetState (States.IsDirty, true);
+            Theme.ThemeChanged += Theme_ThemeChanged;
+        }
+
+        private void Theme_ThemeChanged (object? sender, EventArgs e)
+        {
+            OnThemeChanged (e);
+            SetState (States.IsDirty, true);
+        }
+
+        protected virtual void OnThemeChanged (EventArgs e)
+        {
+        }
+
+        public void Invoke (Action action)
+        {
+            Dispatcher.UIThread.Post (action, DispatcherPriority.Background);
         }
 
         /// <summary>
@@ -493,16 +510,6 @@ namespace Modern.Forms
         /// </summary>
         public bool Focused => Selected;
 
-        /// <summary>
-        /// Releases the back buffer.
-        /// </summary>
-        private void FreeBackBuffer ()
-        {
-            if (back_buffer != null) {
-                back_buffer.Dispose ();
-                back_buffer = null;
-            }
-        }
 
         internal bool GetAnyDisposingInHierarchy ()
         {
@@ -516,20 +523,6 @@ namespace Modern.Forms
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// Gets or creates a back buffer for rendering the control.
-        /// </summary>
-        internal SKBitmap GetBackBuffer ()
-        {
-            if (back_buffer is null || back_buffer.Width != ScaledSize.Width || back_buffer.Height != ScaledSize.Height) {
-                FreeBackBuffer ();
-                back_buffer = new SKBitmap (ScaledSize.Width, ScaledSize.Height, SKImageInfo.PlatformColorType, SKAlphaType.Premul);
-                SetState (States.IsDirty, true);
-            }
-
-            return back_buffer;
         }
 
         /// <summary>
@@ -801,6 +794,11 @@ namespace Modern.Forms
         public void Invalidate () => Invalidate (Bounds);
 
         /// <summary>
+        /// Marks the entire control as needing to be redrawn.
+        /// </summary>
+        public void Invalidate (bool IntersectCheck) => Invalidate (Bounds, IntersectCheck);
+
+        /// <summary>
         /// Marks the specified portion of the control as needing to be redrawn.
         /// </summary>
         /// <param name="rectangle">The portion of the control to be redrawn.</param>
@@ -811,9 +809,79 @@ namespace Modern.Forms
 
             SetState (States.IsDirty, true);
 
+            ControlIntersect (this);
+
+            SetAllChildrenDirty (this); // propagate dirty=true state to all child controls
+
             FindWindow ()?.Invalidate (rectangle);
 
             OnInvalidated (new EventArgs<Rectangle> (rectangle));
+        }
+
+        /// <summary>
+        /// Marks the specified portion of the control as needing to be redrawn.
+        /// </summary>
+        /// <param name="rectangle"></param>
+        /// <param name="ValidateCurrentOnly">If true then skip bounds intersection check.</param>
+        public void Invalidate (Rectangle rectangle, bool ValidateCurrentOnly)
+        {
+            if (!Created)
+                return;
+
+            SetState (States.IsDirty, true);
+
+            if (ValidateCurrentOnly) {
+                ControlIntersect (this);
+            }
+
+            SetAllChildrenDirty (this); // propagate dirty=true state to all child controls
+
+            FindWindow ()?.Invalidate (rectangle);
+
+            OnInvalidated (new EventArgs<Rectangle> (rectangle));
+        }
+
+        /// <summary>
+        /// Invalidate any control that intersects the owner or any other intersected control.
+        /// </summary>
+        private void ControlIntersect (Control owner)
+        {
+            if (Parent == null || !owner.Visible) return;
+
+            var this_loc = owner.GetPositionInForm ();
+            var scaled_this_loc = new Point (
+                        (int)Math.Round (this_loc.X * Scaling, MidpointRounding.ToEven),
+                        (int)Math.Round (this_loc.Y * Scaling, MidpointRounding.ToEven));
+            var ctrl_bounds = new Rectangle (scaled_this_loc, ScaledBounds.Size);
+                        
+            foreach (var c in Parent.Controls.GetAllControls (true)) {
+                if (c == owner || !c.Visible || c.ThisNeedsPaint) continue;
+
+                var c_loc = c.GetPositionInForm ();
+
+                var scaled_c_pos = new Point (
+                        (int)Math.Round (c_loc.X * Scaling, MidpointRounding.ToEven),
+                        (int)Math.Round (c_loc.Y * Scaling, MidpointRounding.ToEven));
+
+                var c_bounds = new Rectangle (scaled_c_pos, c.ScaledBounds.Size);
+
+                if (ctrl_bounds.IntersectsWith (c_bounds)) {  
+                    c.Invalidate ();
+                    ControlIntersect (c);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Mark all child controls as dirty.
+        /// </summary>
+        /// <param name="owner">Control to invalidate with all its child controls</param>
+        private void SetAllChildrenDirty (Control owner)
+        {
+            owner.SetState (States.IsDirty, true);
+            foreach (var ctrl in owner.Controls.GetAllControls (true)) {
+                ctrl.SetAllChildrenDirty (ctrl);
+            }
         }
 
         /// <summary>
@@ -886,7 +954,7 @@ namespace Modern.Forms
         /// Converts an unscaled Padding to a scaled Padding.
         /// </summary>
         public Padding LogicalToDeviceUnits (Padding value)
-        {
+        {            
             return DpiHelper.LogicalToDeviceUnits (value, DeviceDpi);
         }
 
@@ -931,6 +999,8 @@ namespace Modern.Forms
         /// </summary>
         internal bool NeedsPaint => GetState (States.IsDirty) || Controls.GetAllControls ().Any (c => c.NeedsPaint);
 
+        internal bool ThisNeedsPaint => GetState (States.IsDirty);
+
         /// <summary>
         /// The full control canvas.
         /// </summary>
@@ -971,12 +1041,12 @@ namespace Modern.Forms
         /// <summary>
         ///  Raises the <see cref='ControlAdded'/> event.
         /// </summary>
-        protected virtual void OnControlAdded (EventArgs<Control> e) => (Events[s_controlAddedEvent] as EventHandler<EventArgs<Control>>)?.Invoke (this, e);
+        protected virtual void OnControlAdded (EventArgs<Control> e) { Invalidate (); (Events[s_controlAddedEvent] as EventHandler<EventArgs<Control>>)?.Invoke (this, e); }
 
         /// <summary>
         ///  Raises the <see cref='ControlRemoved'/> event.
         /// </summary>
-        protected virtual void OnControlRemoved (EventArgs<Control> e) => (Events[s_controlRemovedEvent] as EventHandler<EventArgs<Control>>)?.Invoke (this, e);
+        protected virtual void OnControlRemoved (EventArgs<Control> e) { Invalidate (); (Events[s_controlRemovedEvent] as EventHandler<EventArgs<Control>>)?.Invoke (this, e); }
 
         /// <summary>
         ///  Called when the control is first created.
@@ -1111,27 +1181,7 @@ namespace Modern.Forms
         /// <param name="e">A PaintEventArgs that contains the event data.</param>
         protected virtual void OnPaint (PaintEventArgs e)
         {
-            foreach (var control in Controls.GetAllControls ().Where (c => c.Visible).ToArray ()) {
-                if (control.Width <= 0 || control.Height <= 0)
-                    continue;
-
-                var info = new SKImageInfo (control.ScaledSize.Width, control.ScaledSize.Height, SKImageInfo.PlatformColorType, SKAlphaType.Premul);
-                var buffer = control.GetBackBuffer ();
-
-                if (control.NeedsPaint) {
-                    using (var canvas = new SKCanvas (buffer)) {
-                        // start drawing
-                        var args = new PaintEventArgs (info, canvas, Scaling);
-
-                        control.RaisePaintBackground (args);
-                        control.RaisePaint (args);
-
-                        canvas.Flush ();
-                    }
-                }
-
-                e.Canvas.DrawBitmap (buffer, control.ScaledLeft, control.ScaledTop);
-            }
+            
         }
 
         /// <summary>
@@ -1296,7 +1346,7 @@ namespace Modern.Forms
                     return point;
 
                 var window_location = window.Location;
-                
+
                 // For Mac, the desktop coordinates are measured at a different scale than
                 // our form coordinates, so we need to fix that. For other platforms, ratio is 1.
                 var desktop_ratio = window.DesktopScaling / window.Scaling;
@@ -1465,7 +1515,7 @@ namespace Modern.Forms
         {
             // If something has the mouse captured, they get all the events
             var captured = Controls.GetAllControls ().LastOrDefault (c => c.Capture);
-
+            
             if (captured != null) {
                 captured.RaiseMouseMove (TranslateMouseEvents (e, captured));
                 return;
@@ -1493,7 +1543,6 @@ namespace Modern.Forms
             else if (Enabled)
                 OnMouseMove (e);
         }
-
         /// <summary>
         /// Finds the correct control and calls its OnMouseUp method.
         /// </summary>
@@ -1522,7 +1571,7 @@ namespace Modern.Forms
         /// <summary>
         /// Finds the correct control and calls its OnMouseWheel method.
         /// </summary>
-        internal void RaiseMouseWheel (MouseEventArgs e)
+        public void RaiseMouseWheel (MouseEventArgs e)
         {
             var child = Controls.GetAllControls ().LastOrDefault (c => c.Visible && c.GetControlBehavior (ControlBehaviors.ReceivesMouseEvents) && c.ScaledBounds.Contains (e.Location));
 
@@ -1770,6 +1819,8 @@ namespace Modern.Forms
                         OnVisibleChanged (EventArgs.Empty);
                 else
                     OnVisibleChanged (EventArgs.Empty);
+
+                Invalidate ();  // needed for single buffer mode
             }
         }
 
@@ -1909,14 +1960,14 @@ namespace Modern.Forms
         /// </summary>
         protected override void Dispose (bool disposing)
         {
-            if (!disposedValue) {
-                FreeBackBuffer ();
-
+            if (!disposedValue) {                
                 foreach (var c in Controls.GetAllControls (true))
                     c.Dispose (disposing);
 
                 disposedValue = true;
             }
+
+            Theme.ThemeChanged -= Theme_ThemeChanged;
 
             base.Dispose (disposing);
         }
