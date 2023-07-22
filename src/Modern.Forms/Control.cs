@@ -1457,8 +1457,8 @@ namespace Modern.Forms
             else {
                 // If we're clicking on the a Control that isn't the active menu, 
                 // we need to close the active menu (if any)
-                if ((this as MenuBase)?.GetTopLevelMenu () != Application.ActiveMenu)
-                    Application.ActiveMenu?.Deactivate ();
+                if ((this as MenuBase)?.GetTopLevelMenu () != Application.ActiveMenu || Application.ActiveMenu is null)
+                    Application.ClosePopups ();
 
                 if (Enabled) {
                     Select ();
